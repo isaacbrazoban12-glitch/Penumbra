@@ -1,7 +1,7 @@
 """
-Protección de Vista - atenuador de pantalla con filtro cálido.
+Penumbra - atenuador de pantalla con filtro cálido.
 Funciona mejor en Windows (los clics atraviesan el filtro).
-Uso: python proteccion_vista.py
+Uso: python penumbra.py
 """
 import json
 import os
@@ -9,7 +9,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-CONFIG = os.path.join(os.path.expanduser("~"), ".proteccion_vista.json")
+CONFIG = os.path.join(os.path.expanduser("~"), ".penumbra.json")
 
 PRESETS = {
     "Normal":      {"oscuridad": 0,  "calidez": 0},
@@ -42,7 +42,7 @@ class App:
     def __init__(self, root):
         self.root = root
         self.cfg = cargar()
-        root.title("Protección de Vista")
+        root.title("Penumbra")
         root.geometry("360x470")
         root.resizable(False, False)
 
@@ -59,7 +59,7 @@ class App:
     # ---------- Interfaz ----------
     def _construir_ui(self):
         pad = {"padx": 16, "pady": 6}
-        ttk.Label(self.root, text="Protección de Vista",
+        ttk.Label(self.root, text="Penumbra",
                   font=("Segoe UI", 16, "bold")).pack(pady=(14, 4))
 
         ttk.Checkbutton(self.root, text="Filtro activado",
@@ -104,8 +104,6 @@ class App:
         ov.update_idletasks()
         self._click_through(ov)
         self.overlay = ov
-        # Mantener la ventana de control por encima del filtro no es posible
-        # sin romper el efecto, así que el control queda debajo (atenuado).
 
     def _click_through(self, win):
         """Hace que los clics atraviesen el filtro (solo Windows)."""
