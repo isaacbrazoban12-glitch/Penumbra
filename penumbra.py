@@ -46,6 +46,12 @@ class App:
         root.geometry("360x470")
         root.resizable(False, False)
 
+        try:
+            _icono = os.path.join(os.path.dirname(os.path.abspath(__file__)), "penumbra.ico")
+            root.iconbitmap(_icono)
+        except Exception:
+            pass
+
         self.overlay = None
         self.var_osc = tk.IntVar(value=self.cfg["oscuridad"])
         self.var_cal = tk.IntVar(value=self.cfg["calidez"])

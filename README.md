@@ -1,3 +1,5 @@
+<p align="center"><img src="penumbra_logo.png" width="120" alt="Logo de Penumbra"></p>
+
 # Penumbra
 
 Protector de vista para laptop hecho en Python con tkinter. Oscurece la pantalla por debajo del brillo mínimo y agrega un filtro cálido que reduce la luz azul, ideal para trabajar de noche o en ambientes oscuros sin forzar la vista.
