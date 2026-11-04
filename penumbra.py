@@ -6,8 +6,68 @@ Uso: python penumbra.py
 import json
 import os
 import sys
-import tkinter as tk
-from tkinter import ttk
+
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except Exception as e:
+    print(f"Error: No se pudo importar tkinter. Asegúrate de tenerlo instalado.\n{e}")
+    sys.exit(1)
+
+
+def _activar_dpi_awareness():
+    """Evita que la ventana se vea borrosa en pantallas de alta resolución (Windows)."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_PER_MONITOR_DPI_AWARE
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+
+def obtener_monitores(root):
+    """Retorna lista de (x, y, ancho, alto) para cada monitor detectado."""
+    monitores = []
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            MONITORENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_int,
+                wintypes.HMONITOR,
+                wintypes.HDC,
+                ctypes.POINTER(wintypes.RECT),
+                wintypes.LPARAM,
+            )
+
+            def callback(hMonitor, hdc, lprc, lParam):
+                rect = lprc.contents
+                monitores.append((
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                ))
+                return 1
+
+            cb = MONITORENUMPROC(callback)
+            user32.EnumDisplayMonitors(None, None, cb, 0)
+            if monitores:
+                return monitores
+        except Exception:
+            pass
+
+    # Fallback: pantalla principal
+    w = root.winfo_screenwidth()
+    h = root.winfo_screenheight()
+    monitores.append((0, 0, w, h))
+    return monitores
+
 
 CONFIG = os.path.join(os.path.expanduser("~"), ".penumbra.json")
 
@@ -19,7 +79,14 @@ PRESETS = {
     "Extremo":     {"oscuridad": 88, "calidez": 90},
 }
 
-DEFAULTS = {"oscuridad": 30, "calidez": 40, "activo": True, "preset": "Lectura"}
+DEFAULTS = {
+    "oscuridad": 30,
+    "calidez": 40,
+    "activo": True,
+    "preset": "Lectura",
+    "pos_x": 100,
+    "pos_y": 100,
+}
 
 
 def cargar():
@@ -43,7 +110,9 @@ class App:
         self.root = root
         self.cfg = cargar()
         root.title("Penumbra")
-        root.geometry("360x470")
+        root.geometry(
+            f"360x470+{self.cfg.get('pos_x', 100)}+{self.cfg.get('pos_y', 100)}"
+        )
         root.resizable(False, False)
 
         try:
@@ -52,14 +121,19 @@ class App:
         except Exception:
             pass
 
-        self.overlay = None
+        self.overlays = []  # uno por monitor
         self.var_osc = tk.IntVar(value=self.cfg["oscuridad"])
         self.var_cal = tk.IntVar(value=self.cfg["calidez"])
         self.var_on = tk.BooleanVar(value=self.cfg["activo"])
 
         self._construir_ui()
-        self._crear_overlay()
+        self._crear_overlays()
         self.aplicar()
+
+        # Atajos de teclado
+        root.bind("<F11>", lambda _: self.toggle_filtro())
+        root.bind("<Escape>", lambda _: self.apagar_completo())
+
         root.protocol("WM_DELETE_WINDOW", self.cerrar)
 
     # ---------- Interfaz ----------
@@ -71,6 +145,10 @@ class App:
         ttk.Checkbutton(self.root, text="Filtro activado",
                         variable=self.var_on,
                         command=self.aplicar).pack(**pad)
+
+        # Atajo rápido visible
+        ttk.Label(self.root, text="Atajos: F11 = activar/desactivar  |  Esc = apagar filtro",
+                  foreground="gray").pack(pady=(0, 6))
 
         # Oscuridad
         f1 = ttk.LabelFrame(self.root, text="Oscuridad (más bajo que el brillo normal)")
@@ -100,16 +178,18 @@ class App:
                   foreground="gray").pack(pady=6)
 
     # ---------- Overlay ----------
-    def _crear_overlay(self):
-        ov = tk.Toplevel(self.root)
-        ov.overrideredirect(True)
-        ov.attributes("-topmost", True)
-        w, h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        ov.geometry(f"{w}x{h}+0+0")
-        ov.configure(bg="black")
-        ov.update_idletasks()
-        self._click_through(ov)
-        self.overlay = ov
+    def _crear_overlays(self):
+        monitores = obtener_monitores(self.root)
+        self.overlays = []
+        for x, y, w, h in monitores:
+            ov = tk.Toplevel(self.root)
+            ov.overrideredirect(True)
+            ov.attributes("-topmost", True)
+            ov.geometry(f"{w}x{h}+{x}+{y}")
+            ov.configure(bg="black")
+            ov.update_idletasks()
+            self._click_through(ov)
+            self.overlays.append(ov)
 
     def _click_through(self, win):
         """Hace que los clics atraviesen el filtro (solo Windows)."""
@@ -145,22 +225,40 @@ class App:
         self.lbl_cal.config(text=f"{cal}%")
 
         if not self.var_on.get():
-            self.overlay.attributes("-alpha", 0.0)
+            alpha = 0.0
+            color = None
         else:
             # Color: negro que se vuelve ámbar oscuro con la calidez.
             c = cal / 100
             r, g, b = int(150 * c), int(55 * c), 0
-            self.overlay.configure(bg=f"#{r:02x}{g:02x}{b:02x}")
-            self.overlay.attributes("-alpha", max(0.0, osc / 100))
-            self.overlay.attributes("-topmost", True)
+            color = f"#{r:02x}{g:02x}{b:02x}"
+            alpha = max(0.0, osc / 100)
+
+        for ov in self.overlays:
+            if color is not None:
+                ov.configure(bg=color)
+            ov.attributes("-alpha", alpha)
+            ov.attributes("-topmost", True)
 
         # La ventana de controles siempre queda por encima del filtro
         self.root.attributes("-topmost", True)
         self.root.lift()
-        self._click_through(self.overlay)
+        for ov in self.overlays:
+            self._click_through(ov)
 
         self.cfg.update(oscuridad=osc, calidez=cal, activo=self.var_on.get())
         guardar(self.cfg)
+
+    def toggle_filtro(self):
+        """Activa o desactiva el filtro con el teclado (F11)."""
+        self.var_on.set(not self.var_on.get())
+        self.aplicar()
+
+    def apagar_completo(self):
+        """Apaga el filtro por completo con el teclado (Esc)."""
+        self.var_on.set(False)
+        self.aplicar()
+        self.root.attributes("-topmost", False)
 
     def preset(self, nombre):
         p = PRESETS[nombre]
@@ -169,12 +267,19 @@ class App:
         self.var_on.set(True)
         self.aplicar()
 
+    def _guardar_posicion(self):
+        self.cfg["pos_x"] = self.root.winfo_x()
+        self.cfg["pos_y"] = self.root.winfo_y()
+        guardar(self.cfg)
+
     def cerrar(self):
+        self._guardar_posicion()
         guardar(self.cfg)
         self.root.destroy()
 
 
 if __name__ == "__main__":
+    _activar_dpi_awareness()
     root = tk.Tk()
     App(root)
     root.mainloop()
